@@ -3,6 +3,8 @@ using System.Windows.Forms;
 
 namespace Blindrun1
 {
+    public enum Difficulty { Easy, Medium, Hard }
+
     static class Program
     {
         [STAThread]
@@ -11,14 +13,13 @@ namespace Blindrun1
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
-            // Показываем меню. Если нажали "Играть" — запускаем игру.
             using (var menu = new FormMenu())
             {
                 if (menu.ShowDialog() != DialogResult.OK)
-                    return; // нажали Выйти или закрыли окно
-            }
+                    return;
 
-            Application.Run(new Form1());
+                Application.Run(new Form1(menu.SelectedDifficulty));
+            }
         }
     }
 }

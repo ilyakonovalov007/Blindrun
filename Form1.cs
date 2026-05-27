@@ -28,7 +28,7 @@ namespace Blindrun1
         // Туман
         private float[,] fogMap = new float[Cols, Rows];
         private const float FogSpeed = 0.0015f;
-        private const float FogLightRadius = 7.5f;
+        private float fogLightRadius;
 
         // Мерцание еды
         private int foodPulse = 0;
@@ -45,6 +45,9 @@ namespace Blindrun1
         // Звук сбора
         private int prevScore = 0;
 
+        // Сложность
+        private Difficulty difficulty;
+
         // Цвета
         private readonly Color BgColor = Color.FromArgb(12, 8, 18);
         private readonly Color GridColor = Color.FromArgb(30, 20, 40);
@@ -58,8 +61,12 @@ namespace Blindrun1
         private readonly Color WallDarkColor = Color.FromArgb(80, 15, 10);
         private readonly Color WallLightColor = Color.FromArgb(200, 70, 50);
 
-        public Form1()
+        public Form1(Difficulty diff = Difficulty.Medium)
         {
+            difficulty = diff;
+            fogLightRadius = diff == Difficulty.Easy ? 9.5f
+                           : diff == Difficulty.Medium ? 7.5f : 5.0f;
+
             InitializeComponent();
 
             this.Text = "🐍 Blindrun";
@@ -100,7 +107,7 @@ namespace Blindrun1
             btnExit.Click += (s, e) => Application.Exit();
             this.Controls.Add(btnExit);
 
-            game = new Game1(Cols, Rows);
+            game = new Game1(Cols, Rows, difficulty);
             InitFog();
 
             gameTimer = new System.Windows.Forms.Timer();
@@ -118,7 +125,7 @@ namespace Blindrun1
 
         private void RestartGame()
         {
-            game = new Game1(Cols, Rows);
+            game = new Game1(Cols, Rows, difficulty);
             gameTimer.Interval = 150;
             deathFlash = 0;
             deathSoundPlayed = false;
@@ -179,9 +186,9 @@ namespace Blindrun1
                         (x - head.X) * (x - head.X) +
                         (y - head.Y) * (y - head.Y));
 
-                    if (dist < FogLightRadius)
+                    if (dist < fogLightRadius)
                     {
-                        float light = 1f - (dist / FogLightRadius);
+                        float light = 1f - (dist / fogLightRadius);
                         light = light * light;
                         fogMap[x, y] = Math.Max(0f, fogMap[x, y] - light * 0.9f);
                     }
@@ -211,7 +218,6 @@ namespace Blindrun1
                 gameTimer.Interval = Math.Max(60, 150 - game.Score * 2);
                 UpdateFog();
 
-                // Звук сбора черепа
                 if (game.Score > prevScore)
                 {
                     prevScore = game.Score;
@@ -221,7 +227,6 @@ namespace Blindrun1
                 foodPulse += foodPulseDir * 3;
                 if (foodPulse >= 40 || foodPulse <= 0) foodPulseDir = -foodPulseDir;
 
-                // Детектируем смену уровня
                 if (game.Level != prevLevel)
                 {
                     prevLevel = game.Level;
@@ -273,7 +278,6 @@ namespace Blindrun1
             catch { }
         }
 
-        /// Три нисходящих тона — эффект смерти
         private byte[] GenerateDeathWav()
         {
             var tones = new (double freq, double dur)[]
@@ -282,10 +286,9 @@ namespace Blindrun1
                 (330, 0.13),
                 (200, 0.22),
             };
-            return BuildWav(tones, 28000);
+            return BuildWav(tones, 8000); // было 28000
         }
 
-        /// Два восходящих тона — приятный "дзинь" при сборе
         private byte[] GeneratePickupWav()
         {
             var tones = new (double freq, double dur)[]
@@ -293,10 +296,9 @@ namespace Blindrun1
                 (440, 0.07),
                 (660, 0.10),
             };
-            return BuildWav(tones, 22000);
+            return BuildWav(tones, 6000); // было 22000
         }
 
-        /// Универсальный генератор WAV (PCM 16-bit, 44100 Hz, моно)
         private byte[] BuildWav((double freq, double dur)[] tones, short amplitude)
         {
             const int sampleRate = 44100;
@@ -328,12 +330,12 @@ namespace Blindrun1
                 bw.Write(System.Text.Encoding.ASCII.GetBytes("WAVE"));
                 bw.Write(System.Text.Encoding.ASCII.GetBytes("fmt "));
                 bw.Write(16);
-                bw.Write((short)1);       // PCM
-                bw.Write((short)1);       // моно
+                bw.Write((short)1);
+                bw.Write((short)1);
                 bw.Write(sampleRate);
-                bw.Write(sampleRate * 2); // byteRate
-                bw.Write((short)2);       // blockAlign
-                bw.Write((short)16);      // bitsPerSample
+                bw.Write(sampleRate * 2);
+                bw.Write((short)2);
+                bw.Write((short)16);
                 bw.Write(System.Text.Encoding.ASCII.GetBytes("data"));
                 bw.Write(dataSize);
                 foreach (var s in samples)
@@ -398,6 +400,15 @@ namespace Blindrun1
 
             DrawWalls(g, cs);
 
+            // Враги — рисуем до тумана, но после стен
+            foreach (var enemy in game.Enemies)
+            {
+                float fog = fogMap[enemy.Pos.X, enemy.Pos.Y];
+                if (fog >= 0.98f) continue;
+                int alpha = (int)(255 * (1f - fog));
+                DrawEnemy(g, enemy.Pos.X, enemy.Pos.Y, alpha, cs);
+            }
+
             var snake = game.Snake;
             for (int i = snake.Count - 1; i >= 1; i--)
             {
@@ -444,16 +455,24 @@ namespace Blindrun1
                 g.DrawRectangle(borderPen, 1, 1, gameWidth - 2, gameHeight - 2);
 
             // HUD
+            string diffLabel = difficulty == Difficulty.Easy ? "ЛЁГКИЙ"
+                             : difficulty == Difficulty.Medium ? "СРЕДНИЙ" : "СЛОЖНЫЙ";
+            Color diffColor = difficulty == Difficulty.Easy ? Color.FromArgb(80, 180, 60)
+                            : difficulty == Difficulty.Medium ? Color.FromArgb(180, 150, 40)
+                            : Color.FromArgb(200, 60, 60);
+
             g.FillRectangle(new SolidBrush(Color.FromArgb(20, 8, 8)), 0, gameHeight, gameWidth, 50);
             using (var hudFont = new Font("Consolas", 13, FontStyle.Bold))
             using (var hudBrush = new SolidBrush(TextColor))
             using (var tipFont = new Font("Consolas", 9))
             using (var tipBrush = new SolidBrush(Color.FromArgb(80, 60, 60)))
             using (var lvlBrush = new SolidBrush(Color.FromArgb(120, 140, 220)))
+            using (var diffBrush = new SolidBrush(diffColor))
             {
                 g.DrawString($"Счёт: {game.Score}", hudFont, hudBrush, 10, gameHeight + 6);
-                g.DrawString($"Длина: {snake.Count}", hudFont, hudBrush, 200, gameHeight + 6);
-                g.DrawString($"Уровень: {game.Level}", hudFont, lvlBrush, 380, gameHeight + 6);
+                g.DrawString($"Длина: {snake.Count}", hudFont, hudBrush, 170, gameHeight + 6);
+                g.DrawString($"Ур: {game.Level}", hudFont, lvlBrush, 310, gameHeight + 6);
+                g.DrawString(diffLabel, hudFont, diffBrush, 400, gameHeight + 6);
                 g.DrawString("WASD/стрелки  P-пауза  F11-полный экран  ESC-выход",
                              tipFont, tipBrush, 10, gameHeight + 30);
             }
@@ -519,6 +538,29 @@ namespace Blindrun1
                         g.FillRectangle(brickBrush, x + 2, y + mid, s - 4, 1);
                     }
                 }
+            }
+        }
+
+        private void DrawEnemy(Graphics g, int col, int row, int alpha, int cs)
+        {
+            int x = col * cs;
+            int y = row * cs;
+            int s = cs;
+            if (s < 4) return;
+
+            int glowAlpha = Math.Min(255, (int)(alpha * 0.4f) + 20);
+            using (var glowBrush = new SolidBrush(Color.FromArgb(glowAlpha, 160, 0, 80)))
+                g.FillEllipse(glowBrush, x - 3, y - 3, s + 6, s + 6);
+
+            using (var font = new Font("Segoe UI Emoji", cs * 0.55f, FontStyle.Regular, GraphicsUnit.Pixel))
+            using (var brush = new SolidBrush(Color.FromArgb(alpha, 220, 80, 80)))
+            {
+                var sf = new StringFormat
+                {
+                    Alignment = StringAlignment.Center,
+                    LineAlignment = StringAlignment.Center
+                };
+                g.DrawString("👁", font, brush, new RectangleF(x, y, s, s), sf);
             }
         }
 
